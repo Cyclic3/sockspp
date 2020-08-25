@@ -223,7 +223,7 @@ namespace sockspp {
         warn_log("SOCKS5 server encountered system error code " + ec.message());
     }
     else
-      boost::asio::spawn([sock{std::move(sock)}, this](auto yield) mutable {
+      boost::asio::spawn(sock.get_executor(), [sock{std::move(sock)}, this](auto yield) mutable {
         server_initial_handshake(sock, yield);
         auto req = receive_connection_request(sock, yield);
         switch (req.first) {

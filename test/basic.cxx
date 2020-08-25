@@ -56,7 +56,7 @@ TEST(sockspp, basic) {
   basic_impl impl;
   sockspp::server socks_srv{&io_ctx, socks_ep, &impl, [](auto x) { std::cout << "SERVER WARN: " << x << std::endl; }};
 
-  boost::asio::spawn([&](auto yield) {
+  boost::asio::spawn(io_ctx, [&](auto yield) {
     decltype(sockspp::connect)* cmds[4] = {nullptr, &sockspp::connect, &sockspp::bind, &sockspp::associate};
     for (auto command : {sockspp::command::Connect, sockspp::command::Bind, sockspp::command::Associate}) {
       target.port(target.port() + 1);
