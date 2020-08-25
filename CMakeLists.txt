@@ -10,7 +10,7 @@ else()
 endif()
 
 project(sockspp VERSION 0.0.1)
-set(PROJECT_NAMESPACE SocksPP)
+set(PROJECT_NAMESPACE Cyclic3)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -70,3 +70,15 @@ install(FILES "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include DESTINATION include)
 
 add_library(${PROJECT_NAMESPACE}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+
+option(SOCKSPP_TEST "Enable testing" ON)
+if (SOCKSPP_TEST)
+  message("Testing enabled")
+  enable_testing()
+  find_package(GTest REQUIRED)
+  include(GoogleTest)
+  file(GLOB_RECURSE sockspp_TESTS ${CMAKE_CURRENT_SOURCE_DIR}/test/*.cxx)
+  add_executable(sockspp_test ${sockspp_TESTS})
+  target_link_libraries(sockspp_test Cyclic3::sockspp GTest::GTest GTest::Main)
+  gtest_discover_tests(sockspp_test)
+endif()

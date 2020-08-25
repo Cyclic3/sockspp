@@ -18,12 +18,6 @@ namespace sockspp {
 
   constexpr uint8_t socks_version = 5;
 
-  enum class command : uint8_t {
-    Connect = 0x01,
-    Bind = 0x02,
-    Associate = 0x03,
-  };
-
   enum class ep_type : uint8_t {
     IPv4 = 0x01,
     IPv6 = 0x04,
@@ -64,7 +58,7 @@ namespace sockspp {
   }
 
   template<typename Stream>
-  boost::asio::ip::tcp::endpoint unpack_ep(Stream& stream, boost::asio::yield_context yield) {
+  ip_endpoint unpack_ep(Stream& stream, boost::asio::yield_context yield) {
     uint8_t type;
     boost::asio::async_read(stream, boost::asio::mutable_buffer(&type, 1),
                             boost::asio::transfer_exactly(1), yield);
@@ -148,13 +142,13 @@ namespace sockspp {
   }
 
   template<typename Addr>
-  boost::asio::ip::tcp::endpoint send_connection_request(boost::asio::ip::tcp::socket& sock, command cmd,
+  ip_endpoint send_connection_request(boost::asio::ip::tcp::socket& sock, command cmd,
                                                          Addr const& addr, uint16_t port,
                                                          boost::asio::yield_context yield) {
 
   }
-  boost::asio::ip::tcp::endpoint send_connection_request(boost::asio::ip::tcp::socket& sock, command cmd,
-                                                         boost::asio::ip::tcp::endpoint const& target,
+  ip_endpoint send_connection_request(boost::asio::ip::tcp::socket& sock, command cmd,
+                                                         ip_endpoint const& target,
                                                          boost::asio::yield_context yield) {
     std::array<uint8_t, buffer_size> buf;
 
@@ -177,9 +171,9 @@ namespace sockspp {
 
     return unpack_ep(sock, yield);
   }
-  std::pair<command, boost::asio::ip::tcp::endpoint> receive_connection_request(boost::asio::ip::tcp::socket& sock,
-                                                                                boost::asio::yield_context yield) {
-    std::pair<command, boost::asio::ip::tcp::endpoint> ret;
+  std::pair<command, ip_endpoint> receive_connection_request(boost::asio::ip::tcp::socket& sock,
+                                                             boost::asio::yield_context yield) {
+    std::pair<command, ip_endpoint> ret;
 
     std::array<uint8_t, 3> buf;
 
@@ -194,7 +188,7 @@ namespace sockspp {
     return ret;
   }
   void answer_connection_request(boost::asio::ip::tcp::socket& sock, status_code status,
-                                 boost::asio::ip::tcp::endpoint const& ep,
+                                 ip_endpoint const& ep,
                                  boost::asio::yield_context yield) {
     std::array<uint8_t, buffer_size> buf;
     auto start = buf.begin();
@@ -207,15 +201,20 @@ namespace sockspp {
     boost::asio::async_write(sock, boost::asio::buffer(buf.data(), static_cast<size_t>(iter - start)), yield);
   }
 
-  boost::asio::ip::tcp::endpoint connect(boost::asio::ip::tcp::socket& sock, boost::asio::ip::tcp::endpoint const& target,
+  ip_endpoint connect(boost::asio::ip::tcp::socket& sock, ip_endpoint const& target,
                                          boost::asio::yield_context yield) {
     client_initial_handshake(sock, yield);
     return send_connection_request(sock, command::Connect, target, yield);
   }
-  boost::asio::ip::tcp::endpoint bind(boost::asio::ip::tcp::socket& sock, boost::asio::ip::tcp::endpoint const& target,
+  ip_endpoint bind(boost::asio::ip::tcp::socket& sock, ip_endpoint const& target,
                                       boost::asio::yield_context yield) {
     client_initial_handshake(sock, yield);
     return send_connection_request(sock, command::Bind, target, yield);
+  }
+  ip_endpoint associate(boost::asio::ip::tcp::socket& sock, ip_endpoint const& target,
+                                           boost::asio::yield_context yield) {
+    client_initial_handshake(sock, yield);
+    return send_connection_request(sock, command::Associate, target, yield);
   }
 
   void server::accept_one(boost::system::error_code ec, boost::asio::ip::tcp::socket sock) {
@@ -229,11 +228,20 @@ namespace sockspp {
         auto req = receive_connection_request(sock, yield);
         switch (req.first) {
           case command::Connect: {
-            socks_impl::return_type<boost::asio::ip::tcp> res = impl->connect(std::move(sock), std::move(req.second));
-            answer_connection_request(sock, res.first, res.second, yield);
+             _impl->connect (std::move(sock), std::move(req.second),
+                             [=](auto&&... x) { answer_connection_request(x..., yield); },
+                             yield);
           } break;
-//          case command::Bind: answer_connection_request(impl->bind(std::move(sock), std::move(req.second)));
-//          case command::Associate: answer_connection_request(impl->associate(std::move(sock), std::move(req.second)));
+          case command::Bind: {
+            _impl->bind     (std::move(sock), std::move(req.second),
+                             [=](auto&&... x) { answer_connection_request(x..., yield); },
+                             yield);
+          } break;
+          case command::Associate: {
+            _impl->associate(std::move(sock), std::move(req.second),
+                             [=](auto&&... x) { answer_connection_request(x..., yield); },
+                             yield);
+          } break;
           default:
             if (warn_log)
               warn_log("SOCKS5 server encountered system error code " + std::to_string(static_cast<int>(req.first)));

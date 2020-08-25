@@ -7,6 +7,9 @@
 #include <cppthings/movable_ptr.hpp>
 
 namespace sockspp {
+  // Used so we can have a single ep type
+  using ip_endpoint = boost::asio::ip::tcp::endpoint;
+
   class request_failure : public std::exception {
   public:
     std::string err;
@@ -23,6 +26,26 @@ namespace sockspp {
 
   inline std::ostream& operator<<(std::ostream& os, request_failure const& e) {
     return os << "Request failure: " << e;
+  }
+
+  enum class command : uint8_t {
+    Connect = 0x01,
+    Bind = 0x02,
+    Associate = 0x03,
+  };
+  constexpr std::string_view command_tostring(command cmd) {
+    constexpr std::array<const char*, 3> msgs = {
+      "connect",
+      "bind",
+      "associate"
+    };
+
+    uint8_t val = static_cast<uint8_t>(cmd);
+
+    if (val >= std::tuple_size_v<decltype(msgs)>)
+      return "Unknown command";
+
+    return msgs[val];
   }
 
   enum class status_code : uint8_t {
@@ -67,38 +90,38 @@ namespace sockspp {
     inline status_error(status_code code_) : code{code_} {}
   };
 
-  boost::asio::ip::tcp::endpoint connect(boost::asio::ip::tcp::socket& sock, boost::asio::ip::tcp::endpoint const& target,
-                                         boost::asio::yield_context yield);
-  boost::asio::ip::tcp::endpoint bind(boost::asio::ip::tcp::socket& sock, boost::asio::ip::tcp::endpoint const& target,
-                                      boost::asio::yield_context yield);
-  boost::asio::ip::tcp::endpoint associate(boost::asio::ip::tcp::socket& sock, boost::asio::ip::udp::endpoint const& target,
-                                           boost::asio::yield_context yield);
-
-  /// Must be constructed uniquely for each socks_server
-  struct socks_impl {
-    template<typename Proto>
-    using return_type = std::pair<status_code, typename Proto::endpoint>;
-
-    virtual return_type<boost::asio::ip::tcp> connect  (boost::asio::ip::tcp::socket&& sock, boost::asio::ip::tcp::endpoint const& target) = 0;
-    virtual return_type<boost::asio::ip::tcp> bind     (boost::asio::ip::tcp::socket&& sock, boost::asio::ip::tcp::endpoint const& target) = 0;
-    virtual return_type<boost::asio::ip::udp> associate(boost::asio::ip::udp::socket&& sock, boost::asio::ip::udp::endpoint const& target) = 0;
-  };
+  ip_endpoint connect  (boost::asio::ip::tcp::socket& sock, ip_endpoint const& target, boost::asio::yield_context yield);
+  ip_endpoint bind     (boost::asio::ip::tcp::socket& sock, ip_endpoint const& target, boost::asio::yield_context yield);
+  ip_endpoint associate(boost::asio::ip::tcp::socket& sock, ip_endpoint const& target, boost::asio::yield_context yield);
 
   class server {
+  public:
+    /// Must be constructed uniquely for each socks_server
+    struct impl {
+      virtual void connect  (boost::asio::ip::tcp::socket&& sock, ip_endpoint const& target,
+                             std::function<void(boost::asio::ip::tcp::socket&, status_code, ip_endpoint const&)> ready,
+                             boost::asio::yield_context yield) = 0;
+      virtual void bind     (boost::asio::ip::tcp::socket&& sock, ip_endpoint const& target,
+                             std::function<void(boost::asio::ip::tcp::socket&, status_code, ip_endpoint const&)> ready,
+                             boost::asio::yield_context yield) = 0;
+      virtual void associate(boost::asio::ip::tcp::socket&& sock, ip_endpoint const& target,
+                             std::function<void(boost::asio::ip::tcp::socket&, status_code, ip_endpoint const&)> ready,
+                             boost::asio::yield_context yield) = 0;
+    };
+
   private:
     boost::asio::ip::tcp::acceptor srv;
-    cppthings::movable_ptr<socks_impl> impl;
+    cppthings::movable_ptr<impl> _impl;
     std::function<void(std::string_view)> warn_log;
 
   private:
     void accept_one(boost::system::error_code, boost::asio::ip::tcp::socket);
 
   public:
-    template<typename F>
     inline server(boost::asio::io_context* io_ctx,
-                  boost::asio::ip::tcp::endpoint const& ep,
-                  socks_impl* impl_,
-                  decltype(warn_log) warn_log_ = {}) : srv{*io_ctx, ep}, impl{impl_}, warn_log{std::move(warn_log_)} {
+                  ip_endpoint const& ep,
+                  impl* impl_,
+                  decltype(warn_log) warn_log_ = {}) : srv{*io_ctx, ep}, _impl{impl_}, warn_log{std::move(warn_log_)} {
       srv.listen();
       srv.async_accept([this](auto&&... args){ accept_one(std::forward<decltype(args)>(args)...); });
     }
